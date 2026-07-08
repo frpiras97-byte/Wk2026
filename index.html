@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="WK 2026 spelersvorm & betslip-bouwer op basis van per-wedstrijd data">
+<title>WK 2026 — Betslip Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0b0f0d;
+    --bg-panel: #101512;
+    --bg-panel-2: #151b17;
+    --bg-raise: #1a221d;
+    --line: #223028;
+    --line-soft: #1a241e;
+    --accent: #c8ff3d;
+    --accent-dim: #7a9a2e;
+    --accent-glow: rgba(200,255,61,0.14);
+    --text: #e8ede9;
+    --text-dim: #8a9a90;
+    --text-faint: #5a6a60;
+    --teamA: #c8ff3d;
+    --teamB: #ff8a5d;
+    --teamB-glow: rgba(255,138,93,0.14);
+    --danger: #ff5d5d;
+    --radius: 8px;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
+  html{ scroll-behavior:smooth; }
+  body{
+    margin:0;
+    background: var(--bg);
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 79px, rgba(200,255,61,0.02) 80px),
+      radial-gradient(ellipse 900px 500px at 15% -5%, rgba(200,255,61,0.06), transparent 65%);
+    color: var(--text);
+    font-family: 'Oswald', sans-serif;
+    min-height:100vh;
+    padding: 24px 16px 120px; /* ruimte voor sticky slip-balk */
+  }
+  .wrap{ max-width: 1060px; margin: 0 auto; }
+
+  /* ---------- header ---------- */
+  header{ margin-bottom: 22px; animation: rise .5s ease both; }
+  .eyebrow{
+    font-family:'JetBrains Mono', monospace; font-size:10.5px; letter-spacing:3px;
+    color: var(--accent); text-transform:uppercase; margin-bottom:6px;
+  }
+  h1{
+    font-size: clamp(30px, 5.5vw, 46px); font-weight:700; letter-spacing:0.5px;
+    margin:0; text-transform:uppercase; line-height:1.05;
+  }
+  h1 em{ font-style:normal; color:var(--accent); }
+  .sub{ color: var(--text-dim); font-size:13px; margin-top:8px; max-width:60ch; line-height:1.5; }
+
+  @keyframes rise{ from{ opacity:0; transform: translateY(10px);} to{ opacity:1; transform:none;} }
+  .panel{ animation: rise .5s ease both; }
+  .panel:nth-of-type(2){ animation-delay:.05s; }
+  .panel:nth-of-type(3){ animation-delay:.1s; }
+  .panel:nth-of-type(4){ animation-delay:.15s; }
+
+  /* ---------- panels ---------- */
+  .panel{
+    background: var(--bg-panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 18px;
+    margin-bottom: 16px;
+  }
+  .panel-title{
+    font-size:11px; text-transform:uppercase; letter-spacing:2px;
+    color: var(--accent); font-weight:600; margin-bottom:12px;
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  }
+  .panel-title::before{ content:''; width:8px; height:8px; background:var(--accent); flex:0 0 auto; }
+  .panel-title .meta{ color:var(--text-dim); font-weight:400; letter-spacing:0; text-transform:none; font-size:11px; font-family:'JetBrains Mono',monospace; }
+
+  .footer-note{ color: var(--text-dim); font-size:11.5px; line-height:1.6; margin-top:10px; }
+  code{ background: var(--bg-panel-2); padding:1px 5px; border-radius:3px; color: var(--accent); font-family:'JetBrains Mono',monospace; font-size:0.92em; }
+
+  /* ---------- data loader ---------- */
+  .load-zone{
+    border:1px dashed var(--line); border-radius:6px; padding:14px;
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  }
+  .load-status{ font-family:'JetBrains Mono', monospace; font-size:12px; color:var(--text-dim); flex:1; min-width:200px; }
+  .load-status.ok{ color: var(--accent); }
+  input[type=file]{ display:none; }
+  .btn{
+    background: var(--accent); color:#0b0f0d; border:none;
+    font-family:'Oswald', sans-serif; font-weight:600; text-transform:uppercase; letter-spacing:1px;
+    font-size:12.5px; padding:10px 18px; border-radius:5px; cursor:pointer;
+    transition: transform .1s ease, box-shadow .15s ease;
+  }
+  .btn:hover{ box-shadow: 0 0 0 2px var(--accent-dim); }
+  .btn:active{ transform: scale(0.97); }
+  .btn.ghost{ background:transparent; color:var(--text-dim); border:1px solid var(--line); }
+  .btn.ghost:hover{ color:var(--text); border-color:var(--accent-dim); box-shadow:none; }
+  .btn.small{ padding:7px 12px; font-size:11px; }
+
+  /* ---------- matchup ---------- */
+  select{
+    width:100%; background: var(--bg); border:1px solid var(--line); color: var(--text);
+    font-family:'Oswald', sans-serif; font-weight:500; font-size:15px;
+    padding:11px 12px; border-radius:5px; outline:none; appearance:none;
+  }
+  select:focus{ border-color: var(--accent); }
+  .matchup-row{ display:flex; align-items:center; gap:10px; }
+  .matchup-row > div{ flex:1; }
+  .vs{ font-family:'JetBrains Mono', monospace; color:var(--text-faint); font-size:12px; flex:0 0 auto !important; }
+  .presets{ display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .preset-btn{
+    background:transparent; border:1px solid var(--line); color:var(--text-dim);
+    font-family:'JetBrains Mono', monospace; font-size:11px; padding:6px 11px;
+    border-radius:20px; cursor:pointer; white-space:nowrap; transition: all .15s ease;
+  }
+  .preset-btn:hover{ border-color: var(--accent); color:var(--accent); }
+
+  .controls-row{ display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+  .control{ display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; }
+  .control select{ width:auto; padding:6px 10px; font-size:12.5px; }
+
+  /* ---------- recommendations ---------- */
+  .rec-list{ display:flex; flex-direction:column; gap:8px; }
+  .rec-card{
+    display:flex; align-items:center; gap:12px;
+    background: var(--bg-panel-2); border:1px solid var(--line); border-radius:6px;
+    padding:12px 14px; cursor:pointer; transition: border-color .15s ease, background .15s ease;
+  }
+  .rec-card:hover{ border-color: var(--accent-dim); background: var(--bg-raise); }
+  .rec-rank{ font-family:'JetBrains Mono', monospace; font-weight:700; font-size:19px; color: var(--accent); flex:0 0 auto; width:24px; }
+  .rec-main{ flex:1; min-width:0; }
+  .rec-player{ font-weight:600; font-size:15px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rec-prop{ color: var(--text-dim); font-size:12px; margin-top:2px; }
+  .rec-prop b{ color: var(--text); font-weight:600; }
+  .rec-rate{ flex:0 0 auto; text-align:right; font-family:'JetBrains Mono', monospace; }
+  .rec-pct{ font-size:18px; font-weight:700; color:var(--accent); }
+  .rec-frac{ font-size:10.5px; color:var(--text-dim); margin-top:1px; }
+  .rec-add{ flex:0 0 auto; font-family:'JetBrains Mono',monospace; font-size:18px; color:var(--text-faint); width:28px; height:28px; border:1px solid var(--line); border-radius:50%; display:flex; align-items:center; justify-content:center; transition: all .15s ease; }
+  .rec-card:hover .rec-add{ color:#0b0f0d; background:var(--accent); border-color:var(--accent); }
+
+  .team-badge{
+    display:inline-block; font-family:'JetBrains Mono', monospace; font-size:9.5px; padding:1px 7px;
+    border-radius:10px; margin-left:7px; letter-spacing:0.5px; vertical-align:middle;
+  }
+  .team-badge.A{ background: var(--accent-glow); color: var(--teamA); }
+  .team-badge.B{ background: var(--teamB-glow); color: var(--teamB); }
+  .pos-badge{
+    display:inline-block; font-family:'JetBrains Mono', monospace; font-size:9px;
+    color: var(--text-dim); background: rgba(255,255,255,0.06); padding:1px 5px; border-radius:3px;
+    margin-left:5px; vertical-align:middle;
+  }
+
+  /* ---------- category pills ---------- */
+  .cat-pills{ display:flex; gap:7px; flex-wrap:wrap; }
+  .cat-pill{
+    background:transparent; border:1px solid var(--line); color:var(--text-dim);
+    font-family:'Oswald', sans-serif; font-weight:500; font-size:12px;
+    padding:7px 13px; border-radius:20px; cursor:pointer; text-transform:uppercase; letter-spacing:0.5px;
+    transition: all .15s ease;
+  }
+  .cat-pill.active{ background:var(--accent); color:#0b0f0d; border-color:var(--accent); font-weight:600; }
+  .cat-pill:not(.active):hover{ border-color: var(--accent-dim); color:var(--text); }
+
+  /* ---------- compare columns ---------- */
+  .compare-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  @media (max-width: 700px){ .compare-grid{ grid-template-columns: 1fr; } }
+  .team-col{ background: var(--bg-panel); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; animation: rise .5s ease both; animation-delay:.2s; }
+  .team-col-header{
+    padding:12px 14px; font-weight:700; text-transform:uppercase; letter-spacing:1px; font-size:13.5px;
+    border-bottom:2px solid; display:flex; justify-content:space-between; align-items:baseline; gap:8px;
+  }
+  .team-col-header.A{ border-color:var(--teamA); color:var(--teamA); }
+  .team-col-header.B{ border-color:var(--teamB); color:var(--teamB); }
+  .team-col-header small{ color:var(--text-dim); font-size:10px; font-family:'JetBrains Mono',monospace; text-transform:none; letter-spacing:0; text-align:right; }
+
+  .player-row{
+    display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--line-soft);
+    font-family:'JetBrains Mono', monospace; cursor:pointer; transition: background .12s ease;
+  }
+  .player-row:last-child{ border-bottom:none; }
+  .player-row:hover{ background: var(--accent-glow); }
+  .rank{ width:18px; color:var(--text-faint); font-size:11.5px; flex:0 0 auto; }
+  .rank.top1{ color:var(--accent); font-weight:700; }
+  .pname{ flex:1; font-family:'Oswald', sans-serif; font-weight:500; font-size:14px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pmatches{ color:var(--text-faint); font-size:10.5px; flex:0 0 auto; }
+  .pval{ font-weight:700; font-size:14.5px; flex:0 0 auto; min-width:36px; text-align:right; }
+
+  /* ---------- threshold picker (inline expand) ---------- */
+  .thresh-row{
+    display:flex; gap:6px; padding:10px 14px; background: var(--bg-panel-2);
+    border-bottom:1px solid var(--line-soft); flex-wrap:wrap; align-items:center;
+  }
+  .thresh-label{ font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; width:100%; margin-bottom:2px; }
+  .thresh-btn{
+    background: var(--bg); border:1px solid var(--line); color:var(--text);
+    font-family:'JetBrains Mono', monospace; font-size:11.5px; padding:7px 10px; border-radius:5px;
+    cursor:pointer; transition: all .15s ease; line-height:1.3; text-align:center;
+  }
+  .thresh-btn b{ color:var(--accent); display:block; font-size:12.5px; }
+  .thresh-btn:hover{ border-color:var(--accent); }
+  .thresh-btn.dim{ opacity:0.45; }
+
+  /* ---------- position matchup ---------- */
+  .posmatch-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  @media (max-width: 700px){ .posmatch-grid{ grid-template-columns: 1fr; } }
+  .posmatch-col{ background: var(--bg-panel-2); border:1px solid var(--line); border-radius:6px; padding:13px 14px; }
+  .posmatch-title{ font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
+  .posmatch-title .def{ color: var(--teamB); }
+  .posmatch-title .att{ color: var(--teamA); }
+  .posmatch-sub{ font-family:'JetBrains Mono', monospace; font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; margin:10px 0 4px; }
+  .posmatch-row{ display:flex; justify-content:space-between; align-items:baseline; padding:4px 0; font-family:'JetBrains Mono', monospace; font-size:12.5px; cursor:pointer; }
+  .posmatch-row:hover .n{ color:var(--accent); }
+  .posmatch-row .n{ font-family:'Oswald', sans-serif; color:var(--text); transition: color .12s ease; }
+  .posmatch-row .v{ font-weight:700; color:var(--text); }
+
+  /* ---------- betslip ---------- */
+  .slip-bar{
+    position:fixed; left:0; right:0; bottom:0; z-index:50;
+    background: rgba(11,15,13,0.92); backdrop-filter: blur(10px);
+    border-top:1px solid var(--line);
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    transform: translateY(110%); transition: transform .25s ease;
+  }
+  .slip-bar.visible{ transform: none; }
+  .slip-bar-inner{ max-width:1060px; margin:0 auto; display:flex; align-items:center; gap:12px; }
+  .slip-count{
+    font-family:'JetBrains Mono', monospace; font-weight:700; font-size:14px; color:#0b0f0d;
+    background: var(--accent); border-radius:20px; padding:4px 12px; flex:0 0 auto;
+  }
+  .slip-summary{ flex:1; font-size:12.5px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  .slip-sheet{
+    position:fixed; left:0; right:0; bottom:0; z-index:60;
+    background: var(--bg-panel); border-top:2px solid var(--accent);
+    border-radius: 14px 14px 0 0;
+    max-height: 75vh; overflow-y:auto;
+    padding: 18px 18px calc(24px + env(safe-area-inset-bottom));
+    transform: translateY(110%); transition: transform .3s cubic-bezier(.2,.8,.25,1);
+    box-shadow: 0 -20px 60px rgba(0,0,0,0.5);
+  }
+  .slip-sheet.open{ transform:none; }
+  .slip-sheet-inner{ max-width:640px; margin:0 auto; }
+  .slip-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .slip-head h2{ font-size:18px; text-transform:uppercase; letter-spacing:1px; margin:0; }
+  .slip-head h2 em{ font-style:normal; color:var(--accent); }
+  .slip-leg{
+    display:flex; align-items:center; gap:10px; padding:11px 0; border-bottom:1px solid var(--line-soft);
+  }
+  .slip-leg-main{ flex:1; min-width:0; }
+  .slip-leg-player{ font-weight:600; font-size:14.5px; }
+  .slip-leg-prop{ font-family:'JetBrains Mono', monospace; font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+  .slip-leg-rate{ font-family:'JetBrains Mono', monospace; font-weight:700; font-size:14px; color:var(--accent); flex:0 0 auto; }
+  .slip-remove{
+    flex:0 0 auto; background:none; border:1px solid var(--line); color:var(--text-dim);
+    width:26px; height:26px; border-radius:50%; cursor:pointer; font-size:14px; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .slip-remove:hover{ border-color:var(--danger); color:var(--danger); }
+  .slip-combined{
+    margin-top:14px; padding:12px 14px; background: var(--bg-panel-2); border:1px solid var(--line); border-radius:6px;
+    font-family:'JetBrains Mono', monospace; font-size:12px; color:var(--text-dim); line-height:1.6;
+  }
+  .slip-combined b{ color:var(--accent); font-size:15px; }
+  .slip-actions{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; }
+  .empty-state{ color: var(--text-dim); font-size:13px; text-align:center; padding: 26px 0; }
+
+  .toast{
+    position:fixed; bottom: 80px; left:50%; transform: translateX(-50%) translateY(20px);
+    background: var(--accent); color:#0b0f0d; font-weight:600; font-size:13px;
+    padding:9px 18px; border-radius:20px; opacity:0; pointer-events:none;
+    transition: all .25s ease; z-index:70; font-family:'Oswald',sans-serif; letter-spacing:0.5px;
+  }
+  .toast.show{ opacity:1; transform: translateX(-50%) translateY(0); }
+
+  .disclaimer{
+    font-family:'JetBrains Mono', monospace; font-size:10.5px; color:var(--text-faint);
+    line-height:1.7; margin-top:24px; padding-top:14px; border-top:1px solid var(--line-soft);
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation:none !important; transition:none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">WK 2026 · Kwartfinales & verder</div>
+    <h1>Betslip <em>Builder</em></h1>
+    <div class="sub">Spelersvorm uit per-wedstrijd data: gemiddelden én hoe vaak een speler een drempel haalde. Tik op een speler om een prop aan je slip toe te voegen.</div>
+  </header>
+
+  <div class="panel">
+    <div class="panel-title">Data <span class="meta" id="loadStatus">nog niets geladen</span></div>
+    <div class="load-zone">
+      <div class="load-status" id="loadDetail">Zoekt <code>wk2026_per_wedstrijd.csv</code> in dezelfde map (GitHub Pages), anders: laad handmatig.</div>
+      <label class="btn small" for="csvFile">CSV laden</label>
+      <input type="file" id="csvFile" accept=".csv">
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Wedstrijd</div>
+    <div class="matchup-row">
+      <div><select id="teamA"><option>—</option></select></div>
+      <div class="vs">VS</div>
+      <div><select id="teamB"><option>—</option></select></div>
+    </div>
+    <div class="presets" id="presets"></div>
+    <div class="controls-row">
+      <div class="control">
+        <span>Min. wedstrijden</span>
+        <select id="minMatches">
+          <option value="1">1+</option>
+          <option value="2">2+</option>
+          <option value="3" selected>3+</option>
+          <option value="4">4+</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Top 5 Aanbevelingen <span class="meta" id="recSubtitle"></span></div>
+    <div class="rec-list" id="recList">
+      <div class="empty-state">Laad data en kies twee teams</div>
+    </div>
+    <div class="footer-note">Gerangschikt op consistentie: hoe vaak haalde de speler deze propdrempel in zijn gespeelde wedstrijden. Tik om toe te voegen aan je slip.</div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Positie-matchup: overtredingen</div>
+    <div class="posmatch-grid" id="posMatchGrid">
+      <div class="empty-state">Laad data en kies twee teams</div>
+    </div>
+    <div class="footer-note">SofaScore geeft enkel brede posities (D/M/F). Verdedigers die veel overtredingen maken, naast aanvallende spelers van de tegenstander die er veel uitlokken — indicatie voor kaart-gevoelige duels. Tik op een naam om een fouten-prop toe te voegen.</div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Per categorie</div>
+    <div class="cat-pills" id="catPills"></div>
+  </div>
+
+  <div class="compare-grid" id="compareGrid">
+    <div class="team-col"><div class="empty-state">Laad data en kies twee teams</div></div>
+    <div class="team-col"><div class="empty-state">Laad data en kies twee teams</div></div>
+  </div>
+
+  <div class="disclaimer">
+    Historische vorm op basis van 4–7 WK-wedstrijden per team — een kleine steekproef. Hit-rates zijn geen kansen
+    en houden geen rekening met tegenstander, speeltijd of opstelling. De "gecombineerd"-indicatie in de slip neemt
+    onafhankelijkheid aan tussen legs, wat in werkelijkheid zelden klopt. Gebruik dit als vormoverzicht, niet als voorspelling.
+  </div>
+
+</div>
+
+<!-- sticky slip bar -->
+<div class="slip-bar" id="slipBar">
+  <div class="slip-bar-inner">
+    <div class="slip-count" id="slipCount">0</div>
+    <div class="slip-summary" id="slipSummary"></div>
+    <button class="btn small" onclick="openSlip()">Bekijk slip</button>
+  </div>
+</div>
+
+<!-- slip sheet -->
+<div class="slip-sheet" id="slipSheet">
+  <div class="slip-sheet-inner">
+    <div class="slip-head">
+      <h2>Mijn <em>slip</em></h2>
+      <button class="btn ghost small" onclick="closeSlip()">Sluiten</button>
+    </div>
+    <div id="slipLegs"></div>
+    <div class="slip-combined" id="slipCombined"></div>
+    <div class="slip-actions">
+      <button class="btn" onclick="copySlip()">Kopieer als tekst</button>
+      <button class="btn ghost" onclick="clearSlip()">Leegmaken</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+/* ============================================================
+   CONFIG
+============================================================ */
+const CATEGORIES = [
+  { key: 'shots',              label: 'Schoten',            thresholds: [1,2,3,4] },
+  { key: 'onTarget',           label: 'Op doel',            thresholds: [1,2,3] },
+  { key: 'headers',            label: 'Kopballen',          thresholds: [1,2] },
+  { key: 'headersOnTarget',    label: 'Kopb. op doel',      thresholds: [1] },
+  { key: 'outsideBox',         label: 'Buiten de 16',       thresholds: [1,2] },
+  { key: 'outsideBoxOnTarget', label: 'Buiten 16 op doel',  thresholds: [1] },
+  { key: 'tackles',            label: 'Tackles',            thresholds: [1,2,3] },
+  { key: 'foulsCommitted',     label: 'Overtr. gemaakt',    thresholds: [1,2] },
+  { key: 'foulsDrawn',         label: 'Overtr. uitgelokt',  thresholds: [1,2,3] },
+];
+// standaard propdrempel per categorie voor de aanbevelingen
+const REC_THRESHOLD = { shots:2, onTarget:1, headers:1, headersOnTarget:1, outsideBox:1, outsideBoxOnTarget:1, tackles:2, foulsCommitted:1, foulsDrawn:2 };
+const PRESETS = [ ['Morocco','France'], ['Belgium','Spain'], ['Norway','England'] ];
+const CSV_FILENAME = 'wk2026_per_wedstrijd.csv';
+const LS_KEYS = { csv: 'wk2026_csv_v2', slip: 'wk2026_slip_v2', matchup: 'wk2026_matchup_v2' };
+
+/* ============================================================
+   STATE
+============================================================ */
+let players = [];          // afgeleid spelersmodel
+let teams = [];
+let activeCategory = 'shots';
+let expandedPlayer = null; // key van speler met open drempel-picker
+let slip = [];
+
+/* ============================================================
+   STORAGE (localStorage met graceful fallback)
+============================================================ */
+const store = {
+  get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
+  set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
+  del(k){ try{ localStorage.removeItem(k); }catch(e){} },
+};
+
+/* ============================================================
+   CSV PARSING & MODEL
+============================================================ */
+function parseCSV(text){
+  text = text.replace(/^\uFEFF/, '');
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(';').map(h => h.trim());
+  return lines.slice(1).map(line => {
+    const cells = line.split(';');
+    const obj = {};
+    headers.forEach((h,i) => { obj[h] = (cells[i] !== undefined ? cells[i].trim() : ''); });
+    return obj;
+  });
+}
+function numOr(v, fb){ const n = parseFloat(v); return isNaN(n) ? fb : n; }
+
+function buildModel(rows){
+  // rijen groeperen per speler+team; per categorie: waardenlijst per wedstrijd
+  const map = new Map();
+  rows.forEach(r => {
+    if (!r.speler || !r.team) return;
+    const key = r.speler + '||' + r.team;
+    if (!map.has(key)){
+      map.set(key, {
+        speler: r.speler, team: r.team,
+        positie: (r.positie || '').toUpperCase() || null,
+        values: Object.fromEntries(CATEGORIES.map(c => [c.key, []])),
+      });
+    }
+    const p = map.get(key);
+    if (r.positie && !p.positie) p.positie = r.positie.toUpperCase();
+    CATEGORIES.forEach(c => { p.values[c.key].push(numOr(r[c.key], 0)); });
+  });
+
+  return [...map.values()].map(p => {
+    const n = p.values.shots.length; // aantal wedstrijden (rijen)
+    const out = { speler: p.speler, team: p.team, positie: p.positie, wedstrijden: n };
+    CATEGORIES.forEach(c => {
+      const vals = p.values[c.key];
+      const sum = vals.reduce((a,b)=>a+b, 0);
+      out[c.key + '_avg'] = n ? sum / n : 0;
+      out[c.key + '_vals'] = vals;
+    });
+    return out;
+  });
+}
+
+function hitRate(p, catKey, threshold){
+  const vals = p[catKey + '_vals'] || [];
+  if (!vals.length) return { rate: 0, hits: 0, n: 0 };
+  const hits = vals.filter(v => v >= threshold).length;
+  return { rate: hits / vals.length, hits, n: vals.length };
+}
+
+/* ============================================================
+   DATA LOADING: fetch (GitHub Pages) -> localStorage -> upload
+============================================================ */
+function ingestCSV(text, source){
+  const rows = parseCSV(text);
+  players = buildModel(rows);
+  if (!players.length){
+    setLoadStatus('Geen bruikbare rijen gevonden in CSV', false);
+    return false;
+  }
+  teams = [...new Set(players.map(p => p.team))].sort();
+  populateTeamSelects();
+  buildPresets();
+  restoreMatchup();
+  setLoadStatus(`${players.length} spelers · ${teams.length} teams · bron: ${source}`, true);
+  store.set(LS_KEYS.csv, text);
+  renderAll();
+  return true;
+}
+
+function setLoadStatus(msg, ok){
+  const el = document.getElementById('loadStatus');
+  el.textContent = msg;
+  document.getElementById('loadDetail').style.display = ok ? 'none' : '';
+  el.style.color = ok ? 'var(--accent)' : '';
+}
+
+async function tryAutoLoad(){
+  // 1. zelfde-map fetch (werkt op GitHub Pages / elke webserver)
+  try{
+    const resp = await fetch(CSV_FILENAME, { cache: 'no-store' });
+    if (resp.ok){
+      const text = await resp.text();
+      if (text.includes(';') && ingestCSV(text, 'repo')) return;
+    }
+  }catch(e){ /* file:// of bestand ontbreekt: stil doorgaan */ }
+  // 2. localStorage van vorige keer
+  const cached = store.get(LS_KEYS.csv);
+  if (cached && ingestCSV(cached, 'browser-cache')) return;
+  // 3. wachten op handmatige upload
+}
+
+document.getElementById('csvFile').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => ingestCSV(ev.target.result, 'upload');
+  reader.readAsText(file);
+});
+
+/* ============================================================
+   MATCHUP UI
+============================================================ */
+function populateTeamSelects(){
+  ['teamA','teamB'].forEach((id, idx) => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = teams.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+    if (teams[idx]) sel.value = teams[idx];
+  });
+}
+function buildPresets(){
+  const el = document.getElementById('presets');
+  el.innerHTML = '';
+  PRESETS.forEach(([a,b]) => {
+    if (!teams.includes(a) && !teams.includes(b)) return;
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn';
+    btn.textContent = `${a} — ${b}`;
+    btn.onclick = () => {
+      if (teams.includes(a)) document.getElementById('teamA').value = a;
+      if (teams.includes(b)) document.getElementById('teamB').value = b;
+      onMatchupChange();
+    };
+    el.appendChild(btn);
+  });
+}
+function saveMatchup(){
+  store.set(LS_KEYS.matchup, JSON.stringify({
+    a: document.getElementById('teamA').value,
+    b: document.getElementById('teamB').value,
+  }));
+}
+function restoreMatchup(){
+  try{
+    const m = JSON.parse(store.get(LS_KEYS.matchup) || 'null');
+    if (m && teams.includes(m.a)) document.getElementById('teamA').value = m.a;
+    if (m && teams.includes(m.b)) document.getElementById('teamB').value = m.b;
+  }catch(e){}
+}
+function onMatchupChange(){ expandedPlayer = null; saveMatchup(); renderAll(); }
+document.getElementById('teamA').addEventListener('change', onMatchupChange);
+document.getElementById('teamB').addEventListener('change', onMatchupChange);
+document.getElementById('minMatches').addEventListener('change', () => { expandedPlayer = null; renderAll(); });
+
+/* ============================================================
+   CATEGORY PILLS
+============================================================ */
+function buildCatPills(){
+  const el = document.getElementById('catPills');
+  el.innerHTML = '';
+  CATEGORIES.forEach(c => {
+    const btn = document.createElement('button');
+    btn.className = 'cat-pill' + (c.key === activeCategory ? ' active' : '');
+    btn.textContent = c.label;
+    btn.onclick = () => { activeCategory = c.key; expandedPlayer = null; buildCatPills(); renderCompare(); };
+    el.appendChild(btn);
+  });
+}
+
+/* ============================================================
+   RENDER: aanbevelingen (consistentie-gedreven)
+============================================================ */
+function computeRecommendations(teamA, teamB, minM){
+  const pool = players.filter(p => (p.team === teamA || p.team === teamB) && p.wedstrijden >= minM);
+  const recs = [];
+  CATEGORIES.forEach(cat => {
+    const t = REC_THRESHOLD[cat.key];
+    pool.forEach(p => {
+      const hr = hitRate(p, cat.key, t);
+      if (hr.rate > 0.5){
+        recs.push({
+          player: p, catKey: cat.key, catLabel: cat.label, threshold: t,
+          rate: hr.rate, hits: hr.hits, n: hr.n,
+          avg: p[cat.key + '_avg'],
+        });
+      }
+    });
+  });
+  recs.sort((a,b) => (b.rate - a.rate) || (b.avg - a.avg) || (b.n - a.n));
+  // max 1 aanbeveling per speler zodat de top-5 divers blijft
+  const seen = new Set(); const top = [];
+  for (const r of recs){
+    const k = r.player.speler + '||' + r.player.team;
+    if (seen.has(k)) continue;
+    seen.add(k); top.push(r);
+    if (top.length === 5) break;
+  }
+  return top;
+}
+
+function renderRecommendations(){
+  const el = document.getElementById('recList');
+  const sub = document.getElementById('recSubtitle');
+  if (!players.length){ el.innerHTML = '<div class="empty-state">Laad data en kies twee teams</div>'; sub.textContent=''; return; }
+  const teamA = document.getElementById('teamA').value;
+  const teamB = document.getElementById('teamB').value;
+  const minM = parseInt(document.getElementById('minMatches').value, 10) || 1;
+  sub.textContent = `${teamA} — ${teamB}`;
+
+  const recs = computeRecommendations(teamA, teamB, minM);
+  if (!recs.length){ el.innerHTML = '<div class="empty-state">Geen consistente props gevonden (probeer min. wedstrijden lager)</div>'; return; }
+
+  el.innerHTML = recs.map((r,i) => `
+    <div class="rec-card" onclick='addLeg(${JSON.stringify(r.player.speler)}, ${JSON.stringify(r.player.team)}, "${r.catKey}", ${r.threshold})'>
+      <div class="rec-rank">${i+1}</div>
+      <div class="rec-main">
+        <div class="rec-player">${escapeHtml(r.player.speler)}<span class="team-badge ${r.player.team===teamA?'A':'B'}">${escapeHtml(r.player.team)}</span>${r.player.positie?`<span class="pos-badge">${escapeHtml(r.player.positie)}</span>`:''}</div>
+        <div class="rec-prop"><b>${r.threshold}+ ${escapeHtml(r.catLabel)}</b> · gem. ${r.avg.toFixed(1)}/wedstrijd</div>
+      </div>
+      <div class="rec-rate">
+        <div class="rec-pct">${Math.round(r.rate*100)}%</div>
+        <div class="rec-frac">${r.hits}/${r.n} wed.</div>
+      </div>
+      <div class="rec-add">+</div>
+    </div>
+  `).join('');
+}
+
+/* ============================================================
+   RENDER: positie-matchup
+============================================================ */
+function posMatchColumnHtml(defTeam, attTeam, minM){
+  const defenders = players
+    .filter(p => p.team === defTeam && p.positie === 'D' && p.wedstrijden >= minM && p.foulsCommitted_avg > 0)
+    .sort((a,b) => b.foulsCommitted_avg - a.foulsCommitted_avg).slice(0,4);
+  const attackers = players
+    .filter(p => p.team === attTeam && (p.positie === 'F' || p.positie === 'M') && p.wedstrijden >= minM && p.foulsDrawn_avg > 0)
+    .sort((a,b) => b.foulsDrawn_avg - a.foulsDrawn_avg).slice(0,4);
+
+  let html = `<div class="posmatch-col">
+    <div class="posmatch-title"><span class="def">${escapeHtml(defTeam)}</span> verdedigt tegen <span class="att">${escapeHtml(attTeam)}</span></div>`;
+  html += `<div class="posmatch-sub">Verdedigers — overtr. gemaakt/wed.</div>`;
+  html += defenders.length
+    ? defenders.map(p => `<div class="posmatch-row" onclick='addLeg(${JSON.stringify(p.speler)}, ${JSON.stringify(p.team)}, "foulsCommitted", 1)'><span class="n">${escapeHtml(p.speler)}</span><span class="v">${p.foulsCommitted_avg.toFixed(1)}</span></div>`).join('')
+    : `<div class="posmatch-row"><span class="n" style="color:var(--text-faint);">geen data (positie ontbreekt in oude CSV?)</span></div>`;
+  html += `<div class="posmatch-sub">Aanvallers — overtr. uitgelokt/wed.</div>`;
+  html += attackers.length
+    ? attackers.map(p => `<div class="posmatch-row" onclick='addLeg(${JSON.stringify(p.speler)}, ${JSON.stringify(p.team)}, "foulsDrawn", 2)'><span class="n">${escapeHtml(p.speler)}</span><span class="v">${p.foulsDrawn_avg.toFixed(1)}</span></div>`).join('')
+    : `<div class="posmatch-row"><span class="n" style="color:var(--text-faint);">geen data</span></div>`;
+  html += `</div>`;
+  return html;
+}
+
+function renderPositionMatchups(){
+  const el = document.getElementById('posMatchGrid');
+  if (!players.length){ el.innerHTML = '<div class="empty-state">Laad data en kies twee teams</div>'; return; }
+  const teamA = document.getElementById('teamA').value;
+  const teamB = document.getElementById('teamB').value;
+  const minM = parseInt(document.getElementById('minMatches').value, 10) || 1;
+  el.innerHTML = posMatchColumnHtml(teamA, teamB, minM) + posMatchColumnHtml(teamB, teamA, minM);
+}
+
+/* ============================================================
+   RENDER: team-kolommen met tap-to-expand drempels
+============================================================ */
+function renderTeamColumn(teamName, side){
+  const minM = parseInt(document.getElementById('minMatches').value, 10) || 1;
+  const cat = CATEGORIES.find(c => c.key === activeCategory);
+
+  const list = players
+    .filter(p => p.team === teamName && p.wedstrijden >= minM)
+    .sort((a,b) => b[activeCategory + '_avg'] - a[activeCategory + '_avg'])
+    .slice(0, 12);
+
+  let html = `<div class="team-col-header ${side}">${escapeHtml(teamName)} <small>${cat.label} · gem./wed.</small></div>`;
+  if (!list.length){
+    html += `<div class="empty-state">Geen spelers met min. ${minM} wedstrijden</div>`;
+    return html;
+  }
+  list.forEach((p, i) => {
+    const pKey = p.speler + '||' + p.team;
+    html += `<div class="player-row" onclick='togglePlayer(${JSON.stringify(pKey)})'>
+      <span class="rank ${i===0?'top1':''}">${i+1}</span>
+      <span class="pname">${escapeHtml(p.speler)}${p.positie?` <span class="pos-badge">${escapeHtml(p.positie)}</span>`:''}</span>
+      <span class="pmatches">${p.wedstrijden}w</span>
+      <span class="pval">${p[activeCategory + '_avg'].toFixed(1)}</span>
+    </div>`;
+    if (expandedPlayer === pKey){
+      html += `<div class="thresh-row"><div class="thresh-label">${escapeHtml(p.speler)} — ${cat.label}: kies drempel voor je slip</div>`;
+      cat.thresholds.forEach(t => {
+        const hr = hitRate(p, cat.key, t);
+        html += `<button class="thresh-btn ${hr.rate < 0.34 ? 'dim':''}" onclick='event.stopPropagation(); addLeg(${JSON.stringify(p.speler)}, ${JSON.stringify(p.team)}, "${cat.key}", ${t})'>
+          ${t}+<b>${Math.round(hr.rate*100)}%</b><span style="color:var(--text-faint); font-size:9.5px;">${hr.hits}/${hr.n}</span>
+        </button>`;
+      });
+      html += `</div>`;
+    }
+  });
+  return html;
+}
+
+function togglePlayer(pKey){
+  expandedPlayer = (expandedPlayer === pKey) ? null : pKey;
+  renderCompare();
+}
+
+function renderCompare(){
+  const grid = document.getElementById('compareGrid');
+  if (!players.length){
+    grid.innerHTML = `<div class="team-col"><div class="empty-state">Laad data en kies twee teams</div></div>
+                       <div class="team-col"><div class="empty-state">Laad data en kies twee teams</div></div>`;
+    return;
+  }
+  const teamA = document.getElementById('teamA').value;
+  const teamB = document.getElementById('teamB').value;
+  grid.innerHTML = `
+    <div class="team-col">${renderTeamColumn(teamA, 'A')}</div>
+    <div class="team-col">${renderTeamColumn(teamB, 'B')}</div>
+  `;
+}
+
+function renderAll(){
+  renderRecommendations();
+  renderPositionMatchups();
+  renderCompare();
+  renderSlipBar();
+}
+
+/* ============================================================
+   BETSLIP
+============================================================ */
+function findPlayer(speler, team){
+  return players.find(p => p.speler === speler && p.team === team) || null;
+}
+
+function addLeg(speler, team, catKey, threshold){
+  const p = findPlayer(speler, team);
+  if (!p) return;
+  const cat = CATEGORIES.find(c => c.key === catKey);
+  const hr = hitRate(p, catKey, threshold);
+  const id = `${speler}||${team}||${catKey}||${threshold}`;
+  if (slip.some(l => l.id === id)){ showToast('Staat al in je slip'); return; }
+  slip.push({
+    id, speler, team, catKey, catLabel: cat.label, threshold,
+    rate: hr.rate, hits: hr.hits, n: hr.n,
+  });
+  persistSlip();
+  renderSlipBar();
+  showToast(`${speler} · ${threshold}+ ${cat.label} toegevoegd`);
+}
+
+function removeLeg(id){
+  slip = slip.filter(l => l.id !== id);
+  persistSlip();
+  renderSlipSheet();
+  renderSlipBar();
+  if (!slip.length) closeSlip();
+}
+
+function clearSlip(){
+  slip = [];
+  persistSlip();
+  renderSlipSheet();
+  renderSlipBar();
+  closeSlip();
+}
+
+function persistSlip(){ store.set(LS_KEYS.slip, JSON.stringify(slip)); }
+function restoreSlip(){
+  try{ slip = JSON.parse(store.get(LS_KEYS.slip) || '[]') || []; }catch(e){ slip = []; }
+}
+
+function renderSlipBar(){
+  const bar = document.getElementById('slipBar');
+  document.getElementById('slipCount').textContent = slip.length;
+  document.getElementById('slipSummary').textContent =
+    slip.map(l => `${l.speler} ${l.threshold}+ ${l.catLabel.toLowerCase()}`).join(' · ');
+  bar.classList.toggle('visible', slip.length > 0);
+}
+
+function renderSlipSheet(){
+  const legsEl = document.getElementById('slipLegs');
+  const combEl = document.getElementById('slipCombined');
+  if (!slip.length){
+    legsEl.innerHTML = '<div class="empty-state">Je slip is leeg</div>';
+    combEl.style.display = 'none';
+    return;
+  }
+  legsEl.innerHTML = slip.map(l => `
+    <div class="slip-leg">
+      <div class="slip-leg-main">
+        <div class="slip-leg-player">${escapeHtml(l.speler)} <span style="color:var(--text-faint); font-size:11px; font-family:'JetBrains Mono',monospace;">${escapeHtml(l.team)}</span></div>
+        <div class="slip-leg-prop">${l.threshold}+ ${escapeHtml(l.catLabel)} · ${l.hits}/${l.n} wedstrijden</div>
+      </div>
+      <div class="slip-leg-rate">${Math.round(l.rate*100)}%</div>
+      <button class="slip-remove" onclick='removeLeg(${JSON.stringify(l.id)})'>×</button>
+    </div>
+  `).join('');
+
+  const combined = slip.reduce((acc, l) => acc * l.rate, 1);
+  combEl.style.display = '';
+  combEl.innerHTML = `Alle ${slip.length} legs haalden hun drempel elk afzonderlijk in het getoonde % van hun wedstrijden.<br>
+    Gecombineerd (ruwe indicatie, onafhankelijkheid aangenomen): <b>${(combined*100).toFixed(1)}%</b><br>
+    <span style="color:var(--text-faint);">Dit is géén winkans — kleine steekproef, geen correctie voor tegenstander of speeltijd.</span>`;
+}
+
+function openSlip(){ renderSlipSheet(); document.getElementById('slipSheet').classList.add('open'); }
+function closeSlip(){ document.getElementById('slipSheet').classList.remove('open'); }
+
+function copySlip(){
+  if (!slip.length) return;
+  const teamA = document.getElementById('teamA').value;
+  const teamB = document.getElementById('teamB').value;
+  const lines = [
+    `WK 2026 slip — ${teamA} vs ${teamB}`,
+    ...slip.map(l => `• ${l.speler} (${l.team}): ${l.threshold}+ ${l.catLabel} — ${Math.round(l.rate*100)}% (${l.hits}/${l.n})`),
+  ];
+  const text = lines.join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(() => showToast('Slip gekopieerd'));
+  } else {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); showToast('Slip gekopieerd'); }catch(e){ showToast('Kopiëren mislukt'); }
+    document.body.removeChild(ta);
+  }
+}
+
+/* ============================================================
+   MISC
+============================================================ */
+let toastTimer = null;
+function showToast(msg){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+}
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ============================================================
+   INIT
+============================================================ */
+buildCatPills();
+restoreSlip();
+renderSlipBar();
+tryAutoLoad();
+</script>
+</body>
+</html>
