@@ -1,0 +1,165 @@
+{
+ "generated_utc": "2026-07-09T07:48:07Z",
+ "matches": [
+  {
+   "match_id": "mt_401944566",
+   "utc_date": "2026-07-12T01:00:00.000Z",
+   "ronde": "Kwartfinale",
+   "home": "Argentina",
+   "away": "Switzerland",
+   "match_odds": {
+    "bookmaker": "Bet365",
+    "home": "1.700",
+    "draw": "3.500",
+    "away": "5.250"
+   },
+   "player_props": [],
+   "availability": [
+    {
+     "team": "Switzerland",
+     "player_id": "pl_25186759",
+     "kind": "blessure",
+     "detail": "knee_injury",
+     "verwachte_terugkeer": "2026-07-21T00:00:00.000Z",
+     "speler": "Johan Manzambi"
+    },
+    {
+     "team": "Switzerland",
+     "player_id": "pl_29708916",
+     "kind": "blessure",
+     "detail": "muscle_injury",
+     "verwachte_terugkeer": "2026-07-20T00:00:00.000Z",
+     "speler": "Michel Aebischer"
+    },
+    {
+     "team": "Switzerland",
+     "player_id": "pl_58765633",
+     "kind": "blessure",
+     "detail": "muscle_injury",
+     "verwachte_terugkeer": "2026-07-15T00:00:00.000Z",
+     "speler": "Luca Jaquez"
+    }
+   ]
+  },
+  {
+   "match_id": "mt_362533071",
+   "utc_date": "2026-07-11T21:00:00.000Z",
+   "ronde": "Kwartfinale",
+   "home": "Norway",
+   "away": "England",
+   "match_odds": {
+    "bookmaker": "Bet365",
+    "home": "3.600",
+    "draw": "3.500",
+    "away": "2.000"
+   },
+   "player_props": [],
+   "availability": [
+    {
+     "team": "Norway",
+     "player_id": "pl_08015208",
+     "kind": "schorsing",
+     "detail": "national_team",
+     "wedstrijden": 1,
+     "speler": "Henrik Sælebakke Falchener"
+    },
+    {
+     "team": "Norway",
+     "player_id": "pl_0978855",
+     "kind": "schorsing",
+     "detail": "national_team",
+     "wedstrijden": 2,
+     "speler": "Patrick Berg"
+    },
+    {
+     "team": "Norway",
+     "player_id": "pl_45852888",
+     "kind": "schorsing",
+     "detail": "national_team",
+     "wedstrijden": 2,
+     "speler": "Jens Petter Hauge"
+    },
+    {
+     "team": "Norway",
+     "player_id": "pl_08448994",
+     "kind": "schorsing",
+     "detail": "national_team",
+     "wedstrijden": 2,
+     "speler": "Fredrik André Bjørkan"
+    },
+    {
+     "team": "England",
+     "player_id": "pl_094375",
+     "kind": "blessure",
+     "detail": "wrist_injury",
+     "verwachte_terugkeer": "2026-08-20T00:00:00.000Z",
+     "speler": "Jordan Henderson"
+    },
+    {
+     "team": "England",
+     "player_id": "pl_72677472",
+     "kind": "schorsing",
+     "detail": "red_card_suspension",
+     "wedstrijden": 1,
+     "speler": "Jarell Quansah"
+    }
+   ]
+  },
+  {
+   "match_id": "mt_019700887",
+   "utc_date": "2026-07-10T19:00:00.000Z",
+   "ronde": "Kwartfinale",
+   "home": "Spain",
+   "away": "Belgium",
+   "match_odds": {
+    "bookmaker": "Bet365",
+    "home": "1.620",
+    "draw": "3.900",
+    "away": "5.250"
+   },
+   "player_props": [],
+   "availability": [
+    {
+     "team": "Belgium",
+     "player_id": "pl_57349263",
+     "kind": "blessure",
+     "detail": "cruciate_ligament_injury",
+     "verwachte_terugkeer": "2027-03-31T00:00:00.000Z",
+     "speler": "Amadou Onana"
+    }
+   ]
+  },
+  {
+   "match_id": "mt_625866143",
+   "utc_date": "2026-07-09T20:00:00.000Z",
+   "ronde": "Kwartfinale",
+   "home": "France",
+   "away": "Morocco",
+   "match_odds": {
+    "bookmaker": "Bet365",
+    "home": "1.570",
+    "draw": "3.900",
+    "away": "6.250"
+   },
+   "player_props": [],
+   "availability": [
+    {
+     "team": "France",
+     "player_id": "pl_45874600",
+     "kind": "blessure",
+     "detail": "groin_injury",
+     "verwachte_terugkeer": "2026-07-19T00:00:00.000Z",
+     "speler": "Aurélien Tchouaméni"
+    },
+    {
+     "team": "Morocco",
+     "player_id": "pl_36550037",
+     "kind": "blessure",
+     "detail": "hamstring_injury",
+     "verwachte_terugkeer": "2026-07-19T00:00:00.000Z",
+     "speler": "Ismael Saibari"
+    }
+   ]
+  }
+ ]
+}
