@@ -342,6 +342,14 @@
           <option value="4">4+</option>
         </select>
       </div>
+      <div class="control" id="minFilterWrap">
+        <span>Speeltijd</span>
+        <select id="minFilter">
+          <option value="alle" selected>Alle invalbeurten</option>
+          <option value="45">Alleen 45+ min</option>
+          <option value="start">Alleen basisplaats</option>
+        </select>
+      </div>
     </div>
   </div>
 
@@ -359,6 +367,22 @@
       <div class="empty-state">Laad data en kies twee teams</div>
     </div>
     <div class="footer-note">SofaScore geeft enkel brede posities (D/M/F). Verdedigers die veel overtredingen maken, naast aanvallende spelers van de tegenstander die er veel uitlokken — indicatie voor kaart-gevoelige duels. Tik op een naam om een fouten-prop toe te voegen.</div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Team-props <span class="meta">totalen per wedstrijd</span></div>
+    <div class="posmatch-grid" id="teamPropsGrid">
+      <div class="empty-state">Laad data en kies twee teams</div>
+    </div>
+    <div class="footer-note">Som van alle spelers per wedstrijd. Tik op een regel voor drempels met hit-rates en voeg toe aan je slip — handig voor team-markten (totaal schoten, fouten, kaarten).</div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Aanval vs Toegestaan <span class="meta">gem. per wedstrijd</span></div>
+    <div class="posmatch-grid" id="attackConcededGrid">
+      <div class="empty-state">Laad data en kies twee teams</div>
+    </div>
+    <div class="footer-note">Links: wat het team zelf produceert. Rechts: wat de tegenstander gemiddeld toestond aan zíjn tegenstanders. Een hoge productie tegen een gulle verdediging is het sterkste signaal. Vereist de nieuwste CSV (met tegenstander-data) — anders blijft "toegestaan" leeg.</div>
   </div>
 
   <div class="panel">
@@ -426,6 +450,18 @@ const CATEGORIES = [
 ];
 // standaard propdrempel per categorie voor de aanbevelingen
 const REC_THRESHOLD = { shots:2, onTarget:1, goals:1, headers:1, headersOnTarget:1, outsideBox:1, outsideBoxOnTarget:1, tackles:2, foulsCommitted:1, foulsDrawn:2 };
+// team-props: teamtotalen per wedstrijd, met eigen (hogere) drempels
+const TEAM_CATEGORIES = [
+  { key: 'shots',          label: 'Schoten',           thresholds: [8,10,12,15] },
+  { key: 'onTarget',       label: 'Op doel',           thresholds: [3,4,5,6] },
+  { key: 'goals',          label: 'Goals',             thresholds: [1,2,3] },
+  { key: 'headers',        label: 'Kopballen',         thresholds: [2,3,4] },
+  { key: 'outsideBox',     label: 'Buiten de 16',      thresholds: [3,4,6] },
+  { key: 'tackles',        label: 'Tackles',           thresholds: [10,14,18] },
+  { key: 'foulsCommitted', label: 'Overtr. gemaakt',   thresholds: [8,10,12,14] },
+  { key: 'foulsDrawn',     label: 'Overtr. uitgelokt', thresholds: [8,10,12,14] },
+  { key: 'geel',           label: 'Gele kaarten',      thresholds: [1,2,3] },
+];
 // koppeling categorie -> player-prop markt in wk2026_odds.json (TheStatsAPI/Bet365)
 const ODDS_MARKET = { shots: 'player_shots', onTarget: 'player_shots_on_target', goals: 'anytime_goalscorer' };
 const PRESETS = [ ['Morocco','France'], ['Belgium','Spain'], ['Norway','England'] ];
@@ -437,9 +473,13 @@ const LS_KEYS = { csv: 'wk2026_csv_v2', slip: 'wk2026_slip_v2', matchup: 'wk2026
    STATE
 ============================================================ */
 let players = [];          // afgeleid spelersmodel
+let teamModel = {};        // teamtotalen per wedstrijd, per team
+let concededModel = {};    // wat elk team TOESTAAT (tegenstander-totalen per wedstrijd)
+let hasMinuten = false;    // of de CSV een minuten-kolom heeft
 let teams = [];
 let activeCategory = 'shots';
 let expandedPlayer = null; // key van speler met open drempel-picker
+let expandedTeamRow = null; // key 'team||catKey' met open drempel-picker
 let slip = [];
 let oddsData = null;       // inhoud van wk2026_odds.json (indien aanwezig)
 
@@ -452,6 +492,7 @@ async function tryLoadOdds(){
       const n = (oddsData.matches || []).length;
       const el = document.getElementById('oddsStatus');
       if (el) el.textContent = n ? `odds geladen · ${n} komende wedstrijden · ${(oddsData.generated_utc||'').slice(0,16)}` : 'odds-bestand leeg';
+      if (players.length){ populateTeamSelects(); restoreMatchup(); }
       renderAll();
     }
   }catch(e){ /* geen odds-bestand: app werkt gewoon zonder */ }
@@ -523,44 +564,129 @@ function buildModel(rows){
         speler: r.speler, team: r.team,
         positie: (r.positie || '').toUpperCase() || null,
         values: Object.fromEntries(CATEGORIES.map(c => [c.key, []])),
+        minuten: [], gestart: [],
       });
     }
     const p = map.get(key);
     if (r.positie && !p.positie) p.positie = r.positie.toUpperCase();
     CATEGORIES.forEach(c => { p.values[c.key].push(numOr(r[c.key], 0)); });
+    p.minuten.push(numOr(r.minuten, -1));  // -1 = kolom ontbreekt in oude CSV
+    p.gestart.push(numOr(r.gestart, -1));
   });
 
+  hasMinuten = rows.length > 0 && rows.some(r => r.minuten !== undefined && r.minuten !== '');
+
   return [...map.values()].map(p => {
-    const n = p.values.shots.length; // aantal wedstrijden (rijen)
-    const out = { speler: p.speler, team: p.team, positie: p.positie, wedstrijden: n };
-    CATEGORIES.forEach(c => {
-      const vals = p.values[c.key];
-      const sum = vals.reduce((a,b)=>a+b, 0);
-      out[c.key + '_avg'] = n ? sum / n : 0;
-      out[c.key + '_vals'] = vals;
-    });
+    const out = { speler: p.speler, team: p.team, positie: p.positie,
+                  wedstrijden: p.values.shots.length,
+                  minuten_vals: p.minuten, gestart_vals: p.gestart };
+    CATEGORIES.forEach(c => { out[c.key + '_vals'] = p.values[c.key]; });
     return out;
   });
 }
 
+/* filter-bewuste helpers: minFilter = 'alle' | '45' | 'start' */
+function playerMask(p){
+  const f = document.getElementById('minFilter') ? document.getElementById('minFilter').value : 'alle';
+  if (f === 'alle' || !hasMinuten) return p.minuten_vals.map(() => true);
+  if (f === '45') return p.minuten_vals.map(v => v >= 45);
+  return p.gestart_vals.map(v => v >= 1); // 'start'
+}
+function pVals(p, catKey){
+  const mask = playerMask(p);
+  return (p[catKey + '_vals'] || []).filter((_, i) => mask[i]);
+}
+function pMatches(p){
+  return playerMask(p).filter(Boolean).length;
+}
+function pAvg(p, catKey){
+  const vals = pVals(p, catKey);
+  if (!vals.length) return 0;
+  return vals.reduce((a,b)=>a+b,0) / vals.length;
+}
 function hitRate(p, catKey, threshold){
-  const vals = p[catKey + '_vals'] || [];
+  const vals = pVals(p, catKey);
   if (!vals.length) return { rate: 0, hits: 0, n: 0 };
   const hits = vals.filter(v => v >= threshold).length;
   return { rate: hits / vals.length, hits, n: vals.length };
+}
+function seriesStr(vals){
+  return vals.map(v => Number.isInteger(v) ? v : v.toFixed(1)).join('·');
 }
 
 /* ============================================================
    DATA LOADING: fetch (GitHub Pages) -> localStorage -> upload
 ============================================================ */
+function buildTeamModel(rows){
+  // teamtotalen per wedstrijd: event_id+team -> som per categorie
+  const perMatch = new Map();
+  const eventTeams = new Map(); // event_id -> [teamnamen]
+  const allKeys = TEAM_CATEGORIES.map(c => c.key);
+  rows.forEach(r => {
+    if (!r.speler || !r.team || !r.event_id) return;
+    const key = r.event_id + '||' + r.team;
+    if (!perMatch.has(key)){
+      perMatch.set(key, { event: r.event_id, team: r.team, sums: Object.fromEntries(allKeys.map(k => [k, 0])) });
+      if (!eventTeams.has(r.event_id)) eventTeams.set(r.event_id, []);
+      eventTeams.get(r.event_id).push(r.team);
+    }
+    const m = perMatch.get(key);
+    allKeys.forEach(k => { m.sums[k] += numOr(r[k], 0); });
+  });
+  // eigen productie per team
+  const byTeam = new Map();
+  // toegestaan: per wedstrijd de totalen van de TEGENSTANDER
+  const conceded = new Map();
+  perMatch.forEach(m => {
+    if (!byTeam.has(m.team)) byTeam.set(m.team, Object.fromEntries(allKeys.map(k => [k, []])));
+    const t = byTeam.get(m.team);
+    allKeys.forEach(k => t[k].push(m.sums[k]));
+
+    const opponents = (eventTeams.get(m.event) || []).filter(x => x !== m.team);
+    opponents.forEach(opp => {
+      if (!conceded.has(opp)) conceded.set(opp, Object.fromEntries(allKeys.map(k => [k, []])));
+      const c = conceded.get(opp);
+      allKeys.forEach(k => c[k].push(m.sums[k]));
+    });
+  });
+  const out = {};
+  byTeam.forEach((vals, team) => { out[team] = { team, wedstrijden: vals.shots.length, vals }; });
+  concededModel = {};
+  conceded.forEach((vals, team) => { concededModel[team] = { team, wedstrijden: vals.shots.length, vals }; });
+  return out;
+}
+
+function concededAvg(teamName, catKey){
+  const t = concededModel[teamName];
+  const vals = t ? t.vals[catKey] : [];
+  if (!vals || !vals.length) return null;
+  return vals.reduce((a,b)=>a+b,0) / vals.length;
+}
+
+function teamHitRate(teamName, catKey, threshold){
+  const t = teamModel[teamName];
+  const vals = t ? t.vals[catKey] : [];
+  if (!vals || !vals.length) return { rate: 0, hits: 0, n: 0 };
+  const hits = vals.filter(v => v >= threshold).length;
+  return { rate: hits / vals.length, hits, n: vals.length };
+}
+function teamAvg(teamName, catKey){
+  const t = teamModel[teamName];
+  const vals = t ? t.vals[catKey] : [];
+  if (!vals || !vals.length) return 0;
+  return vals.reduce((a,b)=>a+b,0) / vals.length;
+}
+
 function ingestCSV(text, source){
   const rows = parseCSV(text);
   players = buildModel(rows);
+  teamModel = buildTeamModel(rows);
   if (!players.length){
     setLoadStatus('Geen bruikbare rijen gevonden in CSV', false);
     return false;
   }
   teams = [...new Set(players.map(p => p.team))].sort();
+  document.getElementById('minFilterWrap').style.display = hasMinuten ? '' : 'none';
   populateTeamSelects();
   buildPresets();
   restoreMatchup();
@@ -604,10 +730,24 @@ document.getElementById('csvFile').addEventListener('change', function(e){
    MATCHUP UI
 ============================================================ */
 function populateTeamSelects(){
+  // dropdown beperken tot nog-actieve teams (uit odds.json) als die info er is
+  let display = teams;
+  if (oddsData && oddsData.alive_teams && oddsData.alive_teams.length){
+    const alive = new Set(oddsData.alive_teams);
+    const filtered = teams.filter(t => alive.has(t));
+    if (filtered.length) display = filtered;
+  } else if (oddsData && oddsData.matches){
+    const alive = new Set();
+    oddsData.matches.forEach(m => { alive.add(m.home); alive.add(m.away); });
+    const filtered = teams.filter(t => alive.has(t));
+    if (filtered.length) display = filtered;
+  }
   ['teamA','teamB'].forEach((id, idx) => {
     const sel = document.getElementById(id);
-    sel.innerHTML = teams.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-    if (teams[idx]) sel.value = teams[idx];
+    const prev = sel.value;
+    sel.innerHTML = display.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+    if (display.includes(prev)) sel.value = prev;
+    else if (display[idx]) sel.value = display[idx];
   });
 }
 function buildPresets(){
@@ -639,10 +779,11 @@ function restoreMatchup(){
     if (m && teams.includes(m.b)) document.getElementById('teamB').value = m.b;
   }catch(e){}
 }
-function onMatchupChange(){ expandedPlayer = null; saveMatchup(); renderAll(); }
+function onMatchupChange(){ expandedPlayer = null; expandedTeamRow = null; saveMatchup(); renderAll(); }
 document.getElementById('teamA').addEventListener('change', onMatchupChange);
 document.getElementById('teamB').addEventListener('change', onMatchupChange);
 document.getElementById('minMatches').addEventListener('change', () => { expandedPlayer = null; renderAll(); });
+document.getElementById('minFilter').addEventListener('change', () => { expandedPlayer = null; renderAll(); });
 
 /* ============================================================
    CATEGORY PILLS
@@ -663,7 +804,7 @@ function buildCatPills(){
    RENDER: aanbevelingen (consistentie-gedreven)
 ============================================================ */
 function computeRecommendations(teamA, teamB, minM){
-  const pool = players.filter(p => (p.team === teamA || p.team === teamB) && p.wedstrijden >= minM);
+  const pool = players.filter(p => (p.team === teamA || p.team === teamB) && pMatches(p) >= minM);
   const recs = [];
   CATEGORIES.forEach(cat => {
     const t = REC_THRESHOLD[cat.key];
@@ -673,7 +814,7 @@ function computeRecommendations(teamA, teamB, minM){
         recs.push({
           player: p, catKey: cat.key, catLabel: cat.label, threshold: t,
           rate: hr.rate, hits: hr.hits, n: hr.n,
-          avg: p[cat.key + '_avg'],
+          avg: pAvg(p, cat.key),
         });
       }
     });
@@ -726,21 +867,21 @@ function renderRecommendations(){
 ============================================================ */
 function posMatchColumnHtml(defTeam, attTeam, minM){
   const defenders = players
-    .filter(p => p.team === defTeam && p.positie === 'D' && p.wedstrijden >= minM && p.foulsCommitted_avg > 0)
-    .sort((a,b) => b.foulsCommitted_avg - a.foulsCommitted_avg).slice(0,4);
+    .filter(p => p.team === defTeam && p.positie === 'D' && pMatches(p) >= minM && pAvg(p,'foulsCommitted') > 0)
+    .sort((a,b) => pAvg(b,'foulsCommitted') - pAvg(a,'foulsCommitted')).slice(0,4);
   const attackers = players
-    .filter(p => p.team === attTeam && (p.positie === 'F' || p.positie === 'M') && p.wedstrijden >= minM && p.foulsDrawn_avg > 0)
-    .sort((a,b) => b.foulsDrawn_avg - a.foulsDrawn_avg).slice(0,4);
+    .filter(p => p.team === attTeam && (p.positie === 'F' || p.positie === 'M') && pMatches(p) >= minM && pAvg(p,'foulsDrawn') > 0)
+    .sort((a,b) => pAvg(b,'foulsDrawn') - pAvg(a,'foulsDrawn')).slice(0,4);
 
   let html = `<div class="posmatch-col">
     <div class="posmatch-title"><span class="def">${escapeHtml(defTeam)}</span> verdedigt tegen <span class="att">${escapeHtml(attTeam)}</span></div>`;
   html += `<div class="posmatch-sub">Verdedigers — overtr. gemaakt/wed.</div>`;
   html += defenders.length
-    ? defenders.map(p => `<div class="posmatch-row" onclick='addLeg(${JSON.stringify(p.speler)}, ${JSON.stringify(p.team)}, "foulsCommitted", 1)'><span class="n">${escapeHtml(p.speler)}</span><span class="v">${p.foulsCommitted_avg.toFixed(1)}</span></div>`).join('')
+    ? defenders.map(p => `<div class="posmatch-row" onclick='addLeg(${JSON.stringify(p.speler)}, ${JSON.stringify(p.team)}, "foulsCommitted", 1)'><span class="n">${escapeHtml(p.speler)}</span><span class="v">${pAvg(p,'foulsCommitted').toFixed(1)}</span></div>`).join('')
     : `<div class="posmatch-row"><span class="n" style="color:var(--text-faint);">geen data (positie ontbreekt in oude CSV?)</span></div>`;
   html += `<div class="posmatch-sub">Aanvallers — overtr. uitgelokt/wed.</div>`;
   html += attackers.length
-    ? attackers.map(p => `<div class="posmatch-row" onclick='addLeg(${JSON.stringify(p.speler)}, ${JSON.stringify(p.team)}, "foulsDrawn", 2)'><span class="n">${escapeHtml(p.speler)}</span><span class="v">${p.foulsDrawn_avg.toFixed(1)}</span></div>`).join('')
+    ? attackers.map(p => `<div class="posmatch-row" onclick='addLeg(${JSON.stringify(p.speler)}, ${JSON.stringify(p.team)}, "foulsDrawn", 2)'><span class="n">${escapeHtml(p.speler)}</span><span class="v">${pAvg(p,'foulsDrawn').toFixed(1)}</span></div>`).join('')
     : `<div class="posmatch-row"><span class="n" style="color:var(--text-faint);">geen data</span></div>`;
   html += `</div>`;
   return html;
@@ -763,8 +904,8 @@ function renderTeamColumn(teamName, side){
   const cat = CATEGORIES.find(c => c.key === activeCategory);
 
   const list = players
-    .filter(p => p.team === teamName && p.wedstrijden >= minM)
-    .sort((a,b) => b[activeCategory + '_avg'] - a[activeCategory + '_avg'])
+    .filter(p => p.team === teamName && pMatches(p) >= minM)
+    .sort((a,b) => pAvg(b, activeCategory) - pAvg(a, activeCategory))
     .slice(0, 12);
 
   let html = `<div class="team-col-header ${side}">${escapeHtml(teamName)} <small>${cat.label} · gem./wed.</small></div>`;
@@ -778,11 +919,12 @@ function renderTeamColumn(teamName, side){
     html += `<div class="player-row" onclick='togglePlayer(${JSON.stringify(pKey)})'>
       <span class="rank ${i===0?'top1':''}">${i+1}</span>
       <span class="pname">${escapeHtml(p.speler)}${p.positie?` <span class="pos-badge">${escapeHtml(p.positie)}</span>`:''}${warn?`<span class="warn-badge" title="${escapeHtml(warn.kind)}">⚠</span>`:''}</span>
-      <span class="pmatches">${p.wedstrijden}w</span>
-      <span class="pval">${p[activeCategory + '_avg'].toFixed(1)}</span>
+      <span class="pmatches">${pMatches(p)}w</span>
+      <span class="pval">${pAvg(p, activeCategory).toFixed(1)}</span>
     </div>`;
     if (expandedPlayer === pKey){
-      html += `<div class="thresh-row"><div class="thresh-label">${escapeHtml(p.speler)} — ${cat.label}: kies drempel voor je slip</div>`;
+      html += `<div class="thresh-row"><div class="thresh-label">${escapeHtml(p.speler)} — ${cat.label}
+        <span style="color:var(--text-faint); text-transform:none; letter-spacing:0; margin-left:8px; font-family:'JetBrains Mono',monospace;">reeks: ${seriesStr(pVals(p, cat.key))}</span></div>`;
       cat.thresholds.forEach(t => {
         const hr = hitRate(p, cat.key, t);
         const odd = findPropOdd(p.speler, cat.key, t);
@@ -816,6 +958,66 @@ function renderCompare(){
   `;
 }
 
+function teamPropsColumnHtml(teamName, side){
+  const t = teamModel[teamName];
+  let html = `<div class="posmatch-col">
+    <div class="posmatch-title"><span class="${side === 'A' ? 'att' : 'def'}">${escapeHtml(teamName)}</span>
+    <span style="color:var(--text-faint); font-family:'JetBrains Mono',monospace; font-size:10px;">${t ? t.wedstrijden + ' wedstrijden' : 'geen data'}</span></div>`;
+  if (!t){
+    html += `<div class="posmatch-row"><span class="n" style="color:var(--text-faint);">geen data</span></div></div>`;
+    return html;
+  }
+  TEAM_CATEGORIES.forEach(cat => {
+    const rowKey = teamName + '||' + cat.key;
+    html += `<div class="posmatch-row" onclick='toggleTeamRow(${JSON.stringify(rowKey)})'>
+      <span class="n">${escapeHtml(cat.label)}</span>
+      <span class="v">${teamAvg(teamName, cat.key).toFixed(1)}</span>
+    </div>`;
+    if (expandedTeamRow === rowKey){
+      html += `<div class="thresh-row" style="border-bottom:none; border-radius:4px; margin:2px 0 6px;">
+        <div class="thresh-label">reeks: ${seriesStr(t.vals[cat.key])}</div>`;
+      cat.thresholds.forEach(th => {
+        const hr = teamHitRate(teamName, cat.key, th);
+        html += `<button class="thresh-btn ${hr.rate < 0.34 ? 'dim':''}" onclick='event.stopPropagation(); addTeamLeg(${JSON.stringify(teamName)}, "${cat.key}", ${th})'>
+          ${th}+<b>${Math.round(hr.rate*100)}%</b><span style="color:var(--text-faint); font-size:9.5px;">${hr.hits}/${hr.n}</span>
+        </button>`;
+      });
+      html += `</div>`;
+    }
+  });
+  html += `</div>`;
+  return html;
+}
+
+function toggleTeamRow(rowKey){
+  expandedTeamRow = (expandedTeamRow === rowKey) ? null : rowKey;
+  renderTeamProps();
+}
+
+function renderTeamProps(){
+  const el = document.getElementById('teamPropsGrid');
+  if (!el) return;
+  if (!players.length){ el.innerHTML = '<div class="empty-state">Laad data en kies twee teams</div>'; return; }
+  const teamA = document.getElementById('teamA').value;
+  const teamB = document.getElementById('teamB').value;
+  el.innerHTML = teamPropsColumnHtml(teamA, 'A') + teamPropsColumnHtml(teamB, 'B');
+}
+
+function addTeamLeg(teamName, catKey, threshold){
+  const cat = TEAM_CATEGORIES.find(c => c.key === catKey);
+  const hr = teamHitRate(teamName, catKey, threshold);
+  const id = `TEAM||${teamName}||${catKey}||${threshold}`;
+  if (slip.some(l => l.id === id)){ showToast('Staat al in je slip'); return; }
+  slip.push({
+    id, legType: 'team', speler: `${teamName} (team)`, team: teamName,
+    catKey, catLabel: cat.label, threshold,
+    rate: hr.rate, hits: hr.hits, n: hr.n, odd: null,
+  });
+  persistSlip();
+  renderSlipBar();
+  showToast(`${teamName} · ${threshold}+ ${cat.label} (team) toegevoegd`);
+}
+
 function renderMatchOddsStrip(){
   const el = document.getElementById('matchOddsStrip');
   if (!el) return;
@@ -828,6 +1030,15 @@ function renderMatchOddsStrip(){
       <span>Gelijk <b>${m.match_odds.draw ?? '–'}</b></span>
       <span>${escapeHtml(m.away)} <b>${m.match_odds.away ?? '–'}</b></span>`;
   }
+  if (m.referee && m.referee.name){
+    let refLine = `Scheids: <b>${escapeHtml(m.referee.name)}</b>`;
+    if (m.referee.stats){
+      const parts = Object.entries(m.referee.stats).slice(0, 4)
+        .map(([k, v]) => `${escapeHtml(k.replace(/_/g,' '))}: <b>${typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(1)) : v}</b>`);
+      if (parts.length) refLine += ' · ' + parts.join(' · ');
+    }
+    html += `<span style="width:100%;">${refLine}</span>`;
+  }
   if (m.availability && m.availability.length){
     html += `<div class="avail-list" style="width:100%;">` + m.availability.map(a =>
       `<div class="avail-item">⚠ <b>${escapeHtml(a.speler || '?')}</b> (${escapeHtml(a.team)}) — ${escapeHtml(a.kind)}${a.detail ? ': ' + escapeHtml(String(a.detail).replace(/_/g,' ')) : ''}</div>`
@@ -836,10 +1047,39 @@ function renderMatchOddsStrip(){
   el.innerHTML = html;
 }
 
+function attackConcededColumnHtml(attTeam, defTeam, side){
+  let html = `<div class="posmatch-col">
+    <div class="posmatch-title"><span class="${side==='A'?'att':'def'}">${escapeHtml(attTeam)}</span> aanvallend vs wat <span class="${side==='A'?'def':'att'}">${escapeHtml(defTeam)}</span> toestaat</div>`;
+  const rows = ['shots','onTarget','goals','headers','outsideBox','foulsDrawn'];
+  rows.forEach(key => {
+    const cat = TEAM_CATEGORIES.find(c => c.key === key);
+    if (!cat) return;
+    const own = teamAvg(attTeam, key);
+    const allowed = concededAvg(defTeam, key);
+    html += `<div class="posmatch-row">
+      <span class="n">${escapeHtml(cat.label)}</span>
+      <span class="v">${own.toFixed(1)} <span style="color:var(--text-faint); font-weight:400;">→ laat toe</span> ${allowed === null ? '<span style="color:var(--text-faint);">–</span>' : allowed.toFixed(1)}</span>
+    </div>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+function renderAttackConceded(){
+  const el = document.getElementById('attackConcededGrid');
+  if (!el) return;
+  if (!players.length){ el.innerHTML = '<div class="empty-state">Laad data en kies twee teams</div>'; return; }
+  const teamA = document.getElementById('teamA').value;
+  const teamB = document.getElementById('teamB').value;
+  el.innerHTML = attackConcededColumnHtml(teamA, teamB, 'A') + attackConcededColumnHtml(teamB, teamA, 'B');
+}
+
 function renderAll(){
   renderMatchOddsStrip();
   renderRecommendations();
   renderPositionMatchups();
+  renderTeamProps();
+  renderAttackConceded();
   renderCompare();
   renderSlipBar();
 }
