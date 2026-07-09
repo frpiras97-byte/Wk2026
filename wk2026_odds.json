@@ -1,5 +1,15 @@
 {
- "generated_utc": "2026-07-09T07:48:07Z",
+ "generated_utc": "2026-07-09T16:37:10Z",
+ "alive_teams": [
+  "Argentina",
+  "Belgium",
+  "England",
+  "France",
+  "Morocco",
+  "Norway",
+  "Spain",
+  "Switzerland"
+ ],
  "matches": [
   {
    "match_id": "mt_401944566",
@@ -39,7 +49,8 @@
      "verwachte_terugkeer": "2026-07-15T00:00:00.000Z",
      "speler": "Luca Jaquez"
     }
-   ]
+   ],
+   "referee": null
   },
   {
    "match_id": "mt_362533071",
@@ -103,7 +114,8 @@
      "wedstrijden": 1,
      "speler": "Jarell Quansah"
     }
-   ]
+   ],
+   "referee": null
   },
   {
    "match_id": "mt_019700887",
@@ -127,7 +139,8 @@
      "verwachte_terugkeer": "2027-03-31T00:00:00.000Z",
      "speler": "Amadou Onana"
     }
-   ]
+   ],
+   "referee": null
   },
   {
    "match_id": "mt_625866143",
@@ -159,7 +172,8 @@
      "verwachte_terugkeer": "2026-07-19T00:00:00.000Z",
      "speler": "Ismael Saibari"
     }
-   ]
+   ],
+   "referee": null
   }
  ]
 }
