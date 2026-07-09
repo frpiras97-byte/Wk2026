@@ -276,6 +276,24 @@
   }
   .toast.show{ opacity:1; transform: translateX(-50%) translateY(0); }
 
+  .odd-chip{
+    display:inline-block; font-family:'JetBrains Mono', monospace; font-size:10px; font-weight:700;
+    background: var(--teamB-glow); color: var(--teamB); padding:1px 6px; border-radius:4px;
+    margin-left:6px; vertical-align:middle;
+  }
+  .warn-badge{
+    display:inline-block; font-size:11px; margin-left:5px; vertical-align:middle;
+    filter: saturate(1.2);
+  }
+  .match-odds-strip{
+    display:flex; gap:10px; margin-top:10px; font-family:'JetBrains Mono', monospace;
+    font-size:11.5px; color:var(--text-dim); flex-wrap:wrap;
+  }
+  .match-odds-strip span b{ color:var(--text); font-weight:700; }
+  .avail-list{ margin-top:10px; }
+  .avail-item{ font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--text-dim); padding:2px 0; }
+  .avail-item b{ color:var(--danger); font-weight:500; }
+
   .disclaimer{
     font-family:'JetBrains Mono', monospace; font-size:10.5px; color:var(--text-faint);
     line-height:1.7; margin-top:24px; padding-top:14px; border-top:1px solid var(--line-soft);
@@ -302,6 +320,7 @@
       <label class="btn small" for="csvFile">CSV laden</label>
       <input type="file" id="csvFile" accept=".csv">
     </div>
+    <div class="footer-note" id="oddsStatus">geen odds-bestand gevonden (optioneel: zet wk2026_odds.json in dezelfde map)</div>
   </div>
 
   <div class="panel">
@@ -311,6 +330,7 @@
       <div class="vs">VS</div>
       <div><select id="teamB"><option>—</option></select></div>
     </div>
+    <div class="match-odds-strip" id="matchOddsStrip"></div>
     <div class="presets" id="presets"></div>
     <div class="controls-row">
       <div class="control">
@@ -395,6 +415,7 @@
 const CATEGORIES = [
   { key: 'shots',              label: 'Schoten',            thresholds: [1,2,3,4] },
   { key: 'onTarget',           label: 'Op doel',            thresholds: [1,2,3] },
+  { key: 'goals',              label: 'Goals',              thresholds: [1,2] },
   { key: 'headers',            label: 'Kopballen',          thresholds: [1,2] },
   { key: 'headersOnTarget',    label: 'Kopb. op doel',      thresholds: [1] },
   { key: 'outsideBox',         label: 'Buiten de 16',       thresholds: [1,2] },
@@ -404,9 +425,12 @@ const CATEGORIES = [
   { key: 'foulsDrawn',         label: 'Overtr. uitgelokt',  thresholds: [1,2,3] },
 ];
 // standaard propdrempel per categorie voor de aanbevelingen
-const REC_THRESHOLD = { shots:2, onTarget:1, headers:1, headersOnTarget:1, outsideBox:1, outsideBoxOnTarget:1, tackles:2, foulsCommitted:1, foulsDrawn:2 };
+const REC_THRESHOLD = { shots:2, onTarget:1, goals:1, headers:1, headersOnTarget:1, outsideBox:1, outsideBoxOnTarget:1, tackles:2, foulsCommitted:1, foulsDrawn:2 };
+// koppeling categorie -> player-prop markt in wk2026_odds.json (TheStatsAPI/Bet365)
+const ODDS_MARKET = { shots: 'player_shots', onTarget: 'player_shots_on_target', goals: 'anytime_goalscorer' };
 const PRESETS = [ ['Morocco','France'], ['Belgium','Spain'], ['Norway','England'] ];
 const CSV_FILENAME = 'wk2026_per_wedstrijd.csv';
+const ODDS_FILENAME = 'wk2026_odds.json';
 const LS_KEYS = { csv: 'wk2026_csv_v2', slip: 'wk2026_slip_v2', matchup: 'wk2026_matchup_v2' };
 
 /* ============================================================
@@ -417,6 +441,50 @@ let teams = [];
 let activeCategory = 'shots';
 let expandedPlayer = null; // key van speler met open drempel-picker
 let slip = [];
+let oddsData = null;       // inhoud van wk2026_odds.json (indien aanwezig)
+
+/* ---- odds helpers ---- */
+async function tryLoadOdds(){
+  try{
+    const resp = await fetch(ODDS_FILENAME, { cache: 'no-store' });
+    if (resp.ok){
+      oddsData = await resp.json();
+      const n = (oddsData.matches || []).length;
+      const el = document.getElementById('oddsStatus');
+      if (el) el.textContent = n ? `odds geladen · ${n} komende wedstrijden · ${(oddsData.generated_utc||'').slice(0,16)}` : 'odds-bestand leeg';
+      renderAll();
+    }
+  }catch(e){ /* geen odds-bestand: app werkt gewoon zonder */ }
+}
+
+function currentUpcomingMatch(){
+  if (!oddsData || !oddsData.matches) return null;
+  const a = document.getElementById('teamA').value;
+  const b = document.getElementById('teamB').value;
+  return oddsData.matches.find(m =>
+    (m.home === a && m.away === b) || (m.home === b && m.away === a)) || null;
+}
+
+function findPropOdd(playerName, catKey, threshold){
+  const m = currentUpcomingMatch();
+  const market = ODDS_MARKET[catKey];
+  if (!m || !market || !m.player_props) return null;
+  const nameLc = playerName.toLowerCase();
+  const wantLine = threshold - 0.5;
+  const hit = m.player_props.find(p =>
+    p.market === market &&
+    (p.speler || '').toLowerCase() === nameLc &&
+    (p.type === 'Over' || p.type === null) &&
+    (p.line === wantLine || (market === 'anytime_goalscorer' && threshold === 1)));
+  return hit ? hit.odd : null;
+}
+
+function availabilityWarning(playerName){
+  const m = currentUpcomingMatch();
+  if (!m || !m.availability) return null;
+  const nameLc = playerName.toLowerCase();
+  return m.availability.find(a => (a.speler || '').toLowerCase() === nameLc) || null;
+}
 
 /* ============================================================
    STORAGE (localStorage met graceful fallback)
@@ -634,20 +702,23 @@ function renderRecommendations(){
   const recs = computeRecommendations(teamA, teamB, minM);
   if (!recs.length){ el.innerHTML = '<div class="empty-state">Geen consistente props gevonden (probeer min. wedstrijden lager)</div>'; return; }
 
-  el.innerHTML = recs.map((r,i) => `
+  el.innerHTML = recs.map((r,i) => {
+    const odd = findPropOdd(r.player.speler, r.catKey, r.threshold);
+    const warn = availabilityWarning(r.player.speler);
+    return `
     <div class="rec-card" onclick='addLeg(${JSON.stringify(r.player.speler)}, ${JSON.stringify(r.player.team)}, "${r.catKey}", ${r.threshold})'>
       <div class="rec-rank">${i+1}</div>
       <div class="rec-main">
-        <div class="rec-player">${escapeHtml(r.player.speler)}<span class="team-badge ${r.player.team===teamA?'A':'B'}">${escapeHtml(r.player.team)}</span>${r.player.positie?`<span class="pos-badge">${escapeHtml(r.player.positie)}</span>`:''}</div>
-        <div class="rec-prop"><b>${r.threshold}+ ${escapeHtml(r.catLabel)}</b> · gem. ${r.avg.toFixed(1)}/wedstrijd</div>
+        <div class="rec-player">${escapeHtml(r.player.speler)}<span class="team-badge ${r.player.team===teamA?'A':'B'}">${escapeHtml(r.player.team)}</span>${r.player.positie?`<span class="pos-badge">${escapeHtml(r.player.positie)}</span>`:''}${warn?`<span class="warn-badge" title="${escapeHtml(warn.kind)}">⚠</span>`:''}</div>
+        <div class="rec-prop"><b>${r.threshold}+ ${escapeHtml(r.catLabel)}</b> · gem. ${r.avg.toFixed(1)}/wedstrijd${odd?`<span class="odd-chip">@${odd}</span>`:''}</div>
       </div>
       <div class="rec-rate">
         <div class="rec-pct">${Math.round(r.rate*100)}%</div>
         <div class="rec-frac">${r.hits}/${r.n} wed.</div>
       </div>
       <div class="rec-add">+</div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 /* ============================================================
@@ -703,9 +774,10 @@ function renderTeamColumn(teamName, side){
   }
   list.forEach((p, i) => {
     const pKey = p.speler + '||' + p.team;
+    const warn = availabilityWarning(p.speler);
     html += `<div class="player-row" onclick='togglePlayer(${JSON.stringify(pKey)})'>
       <span class="rank ${i===0?'top1':''}">${i+1}</span>
-      <span class="pname">${escapeHtml(p.speler)}${p.positie?` <span class="pos-badge">${escapeHtml(p.positie)}</span>`:''}</span>
+      <span class="pname">${escapeHtml(p.speler)}${p.positie?` <span class="pos-badge">${escapeHtml(p.positie)}</span>`:''}${warn?`<span class="warn-badge" title="${escapeHtml(warn.kind)}">⚠</span>`:''}</span>
       <span class="pmatches">${p.wedstrijden}w</span>
       <span class="pval">${p[activeCategory + '_avg'].toFixed(1)}</span>
     </div>`;
@@ -713,8 +785,9 @@ function renderTeamColumn(teamName, side){
       html += `<div class="thresh-row"><div class="thresh-label">${escapeHtml(p.speler)} — ${cat.label}: kies drempel voor je slip</div>`;
       cat.thresholds.forEach(t => {
         const hr = hitRate(p, cat.key, t);
+        const odd = findPropOdd(p.speler, cat.key, t);
         html += `<button class="thresh-btn ${hr.rate < 0.34 ? 'dim':''}" onclick='event.stopPropagation(); addLeg(${JSON.stringify(p.speler)}, ${JSON.stringify(p.team)}, "${cat.key}", ${t})'>
-          ${t}+<b>${Math.round(hr.rate*100)}%</b><span style="color:var(--text-faint); font-size:9.5px;">${hr.hits}/${hr.n}</span>
+          ${t}+<b>${Math.round(hr.rate*100)}%</b><span style="color:var(--text-faint); font-size:9.5px;">${hr.hits}/${hr.n}${odd?` · @${odd}`:''}</span>
         </button>`;
       });
       html += `</div>`;
@@ -743,7 +816,28 @@ function renderCompare(){
   `;
 }
 
+function renderMatchOddsStrip(){
+  const el = document.getElementById('matchOddsStrip');
+  if (!el) return;
+  const m = currentUpcomingMatch();
+  if (!m){ el.innerHTML = ''; return; }
+  let html = '';
+  if (m.match_odds){
+    html += `<span>${escapeHtml(m.match_odds.bookmaker || '')} 1X2:</span>
+      <span>${escapeHtml(m.home)} <b>${m.match_odds.home ?? '–'}</b></span>
+      <span>Gelijk <b>${m.match_odds.draw ?? '–'}</b></span>
+      <span>${escapeHtml(m.away)} <b>${m.match_odds.away ?? '–'}</b></span>`;
+  }
+  if (m.availability && m.availability.length){
+    html += `<div class="avail-list" style="width:100%;">` + m.availability.map(a =>
+      `<div class="avail-item">⚠ <b>${escapeHtml(a.speler || '?')}</b> (${escapeHtml(a.team)}) — ${escapeHtml(a.kind)}${a.detail ? ': ' + escapeHtml(String(a.detail).replace(/_/g,' ')) : ''}</div>`
+    ).join('') + `</div>`;
+  }
+  el.innerHTML = html;
+}
+
 function renderAll(){
+  renderMatchOddsStrip();
   renderRecommendations();
   renderPositionMatchups();
   renderCompare();
@@ -767,6 +861,7 @@ function addLeg(speler, team, catKey, threshold){
   slip.push({
     id, speler, team, catKey, catLabel: cat.label, threshold,
     rate: hr.rate, hits: hr.hits, n: hr.n,
+    odd: findPropOdd(speler, catKey, threshold),
   });
   persistSlip();
   renderSlipBar();
@@ -814,7 +909,7 @@ function renderSlipSheet(){
     <div class="slip-leg">
       <div class="slip-leg-main">
         <div class="slip-leg-player">${escapeHtml(l.speler)} <span style="color:var(--text-faint); font-size:11px; font-family:'JetBrains Mono',monospace;">${escapeHtml(l.team)}</span></div>
-        <div class="slip-leg-prop">${l.threshold}+ ${escapeHtml(l.catLabel)} · ${l.hits}/${l.n} wedstrijden</div>
+        <div class="slip-leg-prop">${l.threshold}+ ${escapeHtml(l.catLabel)} · ${l.hits}/${l.n} wedstrijden${l.odd?`<span class="odd-chip">@${l.odd}</span>`:''}</div>
       </div>
       <div class="slip-leg-rate">${Math.round(l.rate*100)}%</div>
       <button class="slip-remove" onclick='removeLeg(${JSON.stringify(l.id)})'>×</button>
@@ -822,10 +917,14 @@ function renderSlipSheet(){
   `).join('');
 
   const combined = slip.reduce((acc, l) => acc * l.rate, 1);
+  const legsWithOdds = slip.filter(l => l.odd);
+  const totalOdd = legsWithOdds.length === slip.length && slip.length > 0
+    ? slip.reduce((acc, l) => acc * parseFloat(l.odd), 1) : null;
   combEl.style.display = '';
   combEl.innerHTML = `Alle ${slip.length} legs haalden hun drempel elk afzonderlijk in het getoonde % van hun wedstrijden.<br>
-    Gecombineerd (ruwe indicatie, onafhankelijkheid aangenomen): <b>${(combined*100).toFixed(1)}%</b><br>
-    <span style="color:var(--text-faint);">Dit is géén winkans — kleine steekproef, geen correctie voor tegenstander of speeltijd.</span>`;
+    Gecombineerd (ruwe indicatie, onafhankelijkheid aangenomen): <b>${(combined*100).toFixed(1)}%</b>
+    ${totalOdd ? `<br>Totale Bet365-quotering (alle legs geprijsd): <b>@${totalOdd.toFixed(2)}</b>` : (legsWithOdds.length ? `<br><span style="color:var(--text-faint);">Niet alle legs hebben een Bet365-prijs — totaalquotering niet berekend.</span>` : '')}
+    <br><span style="color:var(--text-faint);">Dit is géén winkans — kleine steekproef, geen correctie voor tegenstander of speeltijd.</span>`;
 }
 
 function openSlip(){ renderSlipSheet(); document.getElementById('slipSheet').classList.add('open'); }
@@ -837,7 +936,7 @@ function copySlip(){
   const teamB = document.getElementById('teamB').value;
   const lines = [
     `WK 2026 slip — ${teamA} vs ${teamB}`,
-    ...slip.map(l => `• ${l.speler} (${l.team}): ${l.threshold}+ ${l.catLabel} — ${Math.round(l.rate*100)}% (${l.hits}/${l.n})`),
+    ...slip.map(l => `• ${l.speler} (${l.team}): ${l.threshold}+ ${l.catLabel} — ${Math.round(l.rate*100)}% (${l.hits}/${l.n})${l.odd ? ` @${l.odd}` : ''}`),
   ];
   const text = lines.join('\n');
   if (navigator.clipboard && navigator.clipboard.writeText){
@@ -872,6 +971,7 @@ buildCatPills();
 restoreSlip();
 renderSlipBar();
 tryAutoLoad();
+tryLoadOdds();
 </script>
 </body>
 </html>
