@@ -362,6 +362,14 @@
   </div>
 
   <div class="panel">
+    <div class="panel-title">Team-props <span class="meta">totalen per wedstrijd</span></div>
+    <div class="posmatch-grid" id="teamPropsGrid">
+      <div class="empty-state">Laad data en kies twee teams</div>
+    </div>
+    <div class="footer-note">Som van alle spelers per wedstrijd. Tik op een regel voor drempels met hit-rates en voeg toe aan je slip — handig voor team-markten (totaal schoten, fouten, kaarten).</div>
+  </div>
+
+  <div class="panel">
     <div class="panel-title">Per categorie</div>
     <div class="cat-pills" id="catPills"></div>
   </div>
@@ -426,6 +434,18 @@ const CATEGORIES = [
 ];
 // standaard propdrempel per categorie voor de aanbevelingen
 const REC_THRESHOLD = { shots:2, onTarget:1, goals:1, headers:1, headersOnTarget:1, outsideBox:1, outsideBoxOnTarget:1, tackles:2, foulsCommitted:1, foulsDrawn:2 };
+// team-props: teamtotalen per wedstrijd, met eigen (hogere) drempels
+const TEAM_CATEGORIES = [
+  { key: 'shots',          label: 'Schoten',           thresholds: [8,10,12,15] },
+  { key: 'onTarget',       label: 'Op doel',           thresholds: [3,4,5,6] },
+  { key: 'goals',          label: 'Goals',             thresholds: [1,2,3] },
+  { key: 'headers',        label: 'Kopballen',         thresholds: [2,3,4] },
+  { key: 'outsideBox',     label: 'Buiten de 16',      thresholds: [3,4,6] },
+  { key: 'tackles',        label: 'Tackles',           thresholds: [10,14,18] },
+  { key: 'foulsCommitted', label: 'Overtr. gemaakt',   thresholds: [8,10,12,14] },
+  { key: 'foulsDrawn',     label: 'Overtr. uitgelokt', thresholds: [8,10,12,14] },
+  { key: 'geel',           label: 'Gele kaarten',      thresholds: [1,2,3] },
+];
 // koppeling categorie -> player-prop markt in wk2026_odds.json (TheStatsAPI/Bet365)
 const ODDS_MARKET = { shots: 'player_shots', onTarget: 'player_shots_on_target', goals: 'anytime_goalscorer' };
 const PRESETS = [ ['Morocco','France'], ['Belgium','Spain'], ['Norway','England'] ];
@@ -437,9 +457,11 @@ const LS_KEYS = { csv: 'wk2026_csv_v2', slip: 'wk2026_slip_v2', matchup: 'wk2026
    STATE
 ============================================================ */
 let players = [];          // afgeleid spelersmodel
+let teamModel = {};        // teamtotalen per wedstrijd, per team
 let teams = [];
 let activeCategory = 'shots';
 let expandedPlayer = null; // key van speler met open drempel-picker
+let expandedTeamRow = null; // key 'team||catKey' met open drempel-picker
 let slip = [];
 let oddsData = null;       // inhoud van wk2026_odds.json (indien aanwezig)
 
@@ -553,9 +575,53 @@ function hitRate(p, catKey, threshold){
 /* ============================================================
    DATA LOADING: fetch (GitHub Pages) -> localStorage -> upload
 ============================================================ */
+function buildTeamModel(rows){
+  // teamtotalen per wedstrijd: event_id+team -> som per categorie
+  const perMatch = new Map();
+  const allKeys = TEAM_CATEGORIES.map(c => c.key);
+  rows.forEach(r => {
+    if (!r.speler || !r.team || !r.event_id) return;
+    const key = r.event_id + '||' + r.team;
+    if (!perMatch.has(key)){
+      perMatch.set(key, { team: r.team, sums: Object.fromEntries(allKeys.map(k => [k, 0])) });
+    }
+    const m = perMatch.get(key);
+    allKeys.forEach(k => { m.sums[k] += numOr(r[k], 0); });
+  });
+  // team -> waardenlijst per categorie (1 waarde per wedstrijd)
+  const byTeam = new Map();
+  perMatch.forEach(m => {
+    if (!byTeam.has(m.team)){
+      byTeam.set(m.team, Object.fromEntries(allKeys.map(k => [k, []])));
+    }
+    const t = byTeam.get(m.team);
+    allKeys.forEach(k => t[k].push(m.sums[k]));
+  });
+  const out = {};
+  byTeam.forEach((vals, team) => {
+    out[team] = { team, wedstrijden: vals.shots.length, vals };
+  });
+  return out;
+}
+
+function teamHitRate(teamName, catKey, threshold){
+  const t = teamModel[teamName];
+  const vals = t ? t.vals[catKey] : [];
+  if (!vals || !vals.length) return { rate: 0, hits: 0, n: 0 };
+  const hits = vals.filter(v => v >= threshold).length;
+  return { rate: hits / vals.length, hits, n: vals.length };
+}
+function teamAvg(teamName, catKey){
+  const t = teamModel[teamName];
+  const vals = t ? t.vals[catKey] : [];
+  if (!vals || !vals.length) return 0;
+  return vals.reduce((a,b)=>a+b,0) / vals.length;
+}
+
 function ingestCSV(text, source){
   const rows = parseCSV(text);
   players = buildModel(rows);
+  teamModel = buildTeamModel(rows);
   if (!players.length){
     setLoadStatus('Geen bruikbare rijen gevonden in CSV', false);
     return false;
@@ -639,7 +705,7 @@ function restoreMatchup(){
     if (m && teams.includes(m.b)) document.getElementById('teamB').value = m.b;
   }catch(e){}
 }
-function onMatchupChange(){ expandedPlayer = null; saveMatchup(); renderAll(); }
+function onMatchupChange(){ expandedPlayer = null; expandedTeamRow = null; saveMatchup(); renderAll(); }
 document.getElementById('teamA').addEventListener('change', onMatchupChange);
 document.getElementById('teamB').addEventListener('change', onMatchupChange);
 document.getElementById('minMatches').addEventListener('change', () => { expandedPlayer = null; renderAll(); });
@@ -816,6 +882,65 @@ function renderCompare(){
   `;
 }
 
+function teamPropsColumnHtml(teamName, side){
+  const t = teamModel[teamName];
+  let html = `<div class="posmatch-col">
+    <div class="posmatch-title"><span class="${side === 'A' ? 'att' : 'def'}">${escapeHtml(teamName)}</span>
+    <span style="color:var(--text-faint); font-family:'JetBrains Mono',monospace; font-size:10px;">${t ? t.wedstrijden + ' wedstrijden' : 'geen data'}</span></div>`;
+  if (!t){
+    html += `<div class="posmatch-row"><span class="n" style="color:var(--text-faint);">geen data</span></div></div>`;
+    return html;
+  }
+  TEAM_CATEGORIES.forEach(cat => {
+    const rowKey = teamName + '||' + cat.key;
+    html += `<div class="posmatch-row" onclick='toggleTeamRow(${JSON.stringify(rowKey)})'>
+      <span class="n">${escapeHtml(cat.label)}</span>
+      <span class="v">${teamAvg(teamName, cat.key).toFixed(1)}</span>
+    </div>`;
+    if (expandedTeamRow === rowKey){
+      html += `<div class="thresh-row" style="border-bottom:none; border-radius:4px; margin:2px 0 6px;">`;
+      cat.thresholds.forEach(th => {
+        const hr = teamHitRate(teamName, cat.key, th);
+        html += `<button class="thresh-btn ${hr.rate < 0.34 ? 'dim':''}" onclick='event.stopPropagation(); addTeamLeg(${JSON.stringify(teamName)}, "${cat.key}", ${th})'>
+          ${th}+<b>${Math.round(hr.rate*100)}%</b><span style="color:var(--text-faint); font-size:9.5px;">${hr.hits}/${hr.n}</span>
+        </button>`;
+      });
+      html += `</div>`;
+    }
+  });
+  html += `</div>`;
+  return html;
+}
+
+function toggleTeamRow(rowKey){
+  expandedTeamRow = (expandedTeamRow === rowKey) ? null : rowKey;
+  renderTeamProps();
+}
+
+function renderTeamProps(){
+  const el = document.getElementById('teamPropsGrid');
+  if (!el) return;
+  if (!players.length){ el.innerHTML = '<div class="empty-state">Laad data en kies twee teams</div>'; return; }
+  const teamA = document.getElementById('teamA').value;
+  const teamB = document.getElementById('teamB').value;
+  el.innerHTML = teamPropsColumnHtml(teamA, 'A') + teamPropsColumnHtml(teamB, 'B');
+}
+
+function addTeamLeg(teamName, catKey, threshold){
+  const cat = TEAM_CATEGORIES.find(c => c.key === catKey);
+  const hr = teamHitRate(teamName, catKey, threshold);
+  const id = `TEAM||${teamName}||${catKey}||${threshold}`;
+  if (slip.some(l => l.id === id)){ showToast('Staat al in je slip'); return; }
+  slip.push({
+    id, legType: 'team', speler: `${teamName} (team)`, team: teamName,
+    catKey, catLabel: cat.label, threshold,
+    rate: hr.rate, hits: hr.hits, n: hr.n, odd: null,
+  });
+  persistSlip();
+  renderSlipBar();
+  showToast(`${teamName} · ${threshold}+ ${cat.label} (team) toegevoegd`);
+}
+
 function renderMatchOddsStrip(){
   const el = document.getElementById('matchOddsStrip');
   if (!el) return;
@@ -840,6 +965,7 @@ function renderAll(){
   renderMatchOddsStrip();
   renderRecommendations();
   renderPositionMatchups();
+  renderTeamProps();
   renderCompare();
   renderSlipBar();
 }
